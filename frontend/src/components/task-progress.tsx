@@ -62,12 +62,14 @@ export function TaskProgress({ progress, failed }: TaskProgressProps) {
           // justo lo que es mientras se calcula.
           aria-valuenow={progress ? percent : undefined}
           aria-valuetext={summary}
-          className={`bg-primary/20 h-2 overflow-hidden rounded-full ${
+          // Azul escrito a pelo a propósito, por petición expresa: no sale de
+          // los tokens de index.css, y el hook de colores a pelo lo señala.
+          className={`h-2 overflow-hidden rounded-full bg-[#2563eb]/20 ${
             progress ? '' : 'animate-pulse'
           }`}
         >
           <div
-            className="bg-primary h-full rounded-full transition-[width] motion-reduce:transition-none"
+            className="h-full rounded-full bg-[#2563eb] transition-[width] motion-reduce:transition-none"
             style={{ width: `${fraction * 100}%` }}
           />
         </div>

@@ -38,6 +38,12 @@
             "statusMessage": "Formateando frontend con Prettier...",
             "timeout": 30,
             "command": "jq -r '.tool_response.filePath // .tool_input.file_path // empty' | { read -r f; case \"$f\" in \"$CLAUDE_PROJECT_DIR\"/frontend/*) cd \"$CLAUDE_PROJECT_DIR/frontend\" && ./node_modules/.bin/prettier --write --ignore-unknown \"$f\";; esac; } 2>/dev/null || true"
+          },
+          {
+            "type": "command",
+            "statusMessage": "Buscando colores escritos a pelo en el frontend...",
+            "timeout": 10,
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/aviso-colores-a-pelo.sh"
           }
         ]
       }

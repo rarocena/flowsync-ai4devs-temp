@@ -155,6 +155,17 @@ Organización de `src/`:
 
 La URL de la API sale de `VITE_API_URL` (ver `frontend/.env.example`); por defecto `http://localhost:3333`.
 
+### De dónde sale una pieza de interfaz nueva
+
+Antes de escribir un componente o un elemento de interfaz, se mira qué hay, en este orden, y se para en el primer paso que lo resuelva:
+
+1. **El catálogo, `frontend/src/components/ui/`.** Se leen las variantes y tamaños que declara cada pieza (los `cva`, como `buttonVariants`) antes de decidir que no sirve: casi siempre lo que hace falta es una variante, un tamaño o un `className` sobre algo que ya existe.
+2. **Los componentes propios, `frontend/src/components/`.** Si uno casi sirve, se adapta por props o por composición en vez de escribir otro parecido.
+3. **Una primitiva de shadcn/ui que aún no esté instalada**, traída con el CLI como dice el Stack de arriba. Se revisa el diff antes de seguir: aquí el CLI no resuelve el alias `@/lib/utils` y ya ha llegado a importar `cn` de un paquete npm ajeno, que además instaló.
+4. **Solo si nada de lo anterior sirve**, una pieza nueva en `frontend/src/components/` (nunca a mano en `ui/`), compuesta con lo que ya hay y con un comentario que diga qué se descartó del catálogo y por qué.
+
+En los cuatro casos, ni duplicar ni inventar estilos: no se copian a mano las clases de una variante que ya existe, y los colores salen de los tokens de `src/index.css` por sus utilidades (`bg-primary`, `text-muted-foreground`, `border-border`…), nunca de un hexadecimal, un `rgb()`/`hsl()` ni una clase de paleta cruda como `bg-blue-600`. Si ningún token encaja, se dice antes de escribir nada: un color nuevo es un token nuevo, y esa decisión no se toma de pasada. El hook `PostToolUse` `.claude/hooks/aviso-colores-a-pelo.sh` avisa, sin bloquear, cuando un Write o un Edit mete uno de esos valores en `frontend/src/`; si la pieza tenía que haber salido del catálogo no lo puede ver ningún script, y por eso es esta regla.
+
 ## Reglas de proceso
 - Convenciones de base de datos (única fuente, no se copian aquí): @docs/convenciones/base-de-datos.md
 - Cualquier tarea de backend se hace con la skill `backend-feature` (`.claude/skills/backend-feature/SKILL.md`), sin que nadie tenga que pedirlo: plan por capas y parada para aprobarlo, tests de contrato con el subagente `test-writer`, rojo, tests congelados por su `shasum`, implementación con el subagente `implementer` hasta el verde, y cierre con `dbhub`, `openapi:check` y Postman.

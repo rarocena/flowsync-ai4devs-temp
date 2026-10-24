@@ -7,6 +7,7 @@ import { useAuth } from '@/auth/use-auth'
 import { useAuthForm } from '@/auth/use-auth-form'
 import { TaskItem } from '@/components/task-item'
 import { TaskFilter } from '@/components/task-filter'
+import { TaskProgress } from '@/components/task-progress'
 import { FieldError } from '@/components/field-error'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -21,6 +22,18 @@ import {
 } from '@/lib/types'
 
 const FIELDS = ['title'] as const
+
+/**
+ * El mapa de estados con una tarea puesta en `status`, sin tocar el original.
+ * Mientras no se sabe nada del equipo (`null`) no hay nada que corregir.
+ */
+function withStatus(
+  statuses: ReadonlyMap<number, TaskStatus> | null,
+  id: number,
+  status: TaskStatus,
+) {
+  return statuses && new Map(statuses).set(id, status)
+}
 
 export function TasksPage() {
   const { user, token } = useAuth()
@@ -42,9 +55,14 @@ export function TasksPage() {
   // El filtro pedido no existe. Va aparte de `loadError` a propósito: son dos
   // finales distintos y compartirlos es justo lo que hay que evitar.
   const [invalidFilter, setInvalidFilter] = useState<string | null>(null)
-  // Cuántas tareas hechas hay, para distinguir «el espacio está vacío» de
-  // «no queda nada abierto». Solo se resuelve cuando hace falta.
-  const [doneCount, setDoneCount] = useState<number | null>(null)
+  // El estado de cada tarea del equipo, sin acotar por el filtro: de aquí salen
+  // la barra de progreso y el recuento de hechas del final vacío. Se corrige a
+  // mano con cada acción propia, igual que la lista, para no volver a pedirlo.
+  const [teamStatuses, setTeamStatuses] = useState<ReadonlyMap<
+    number,
+    TaskStatus
+  > | null>(null)
+  const [teamError, setTeamError] = useState(false)
   const [title, setTitle] = useState('')
   const [statusError, setStatusError] = useState<string | null>(null)
   // Lo que una acción mía se ha llevado fuera de la vista actual. No es un
@@ -75,24 +93,13 @@ export function TasksPage() {
     setTasks(null)
     setLoadError(null)
     setInvalidFilter(null)
-    setDoneCount(null)
     setNotice(null)
     setStatusError(null)
 
     api
       .listTasks(token, statusParam ?? undefined)
-      .then(async (loaded) => {
-        if (cancelled) return
-        setTasks(loaded)
-
-        // Una vista por defecto vacía puede significar dos cosas muy
-        // distintas: que no hay nada, o que ya está todo hecho. Decir la
-        // primera cuando la verdad es la segunda le cuenta al equipo que no ha
-        // hecho nada. Una segunda consulta, y solo en este caso, lo resuelve.
-        if (statusParam || loaded.length > 0) return
-
-        const done = await api.listTasks(token, 'done').catch(() => [])
-        if (!cancelled) setDoneCount(done.length)
+      .then((loaded) => {
+        if (!cancelled) setTasks(loaded)
       })
       .catch((error: unknown) => {
         if (cancelled) return
@@ -110,6 +117,34 @@ export function TasksPage() {
             ? error.message
             : 'No hemos podido cargar las tareas.',
         )
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [token, statusParam])
+
+  // Todo el equipo son las dos mitades que la API sirve por separado: lo que
+  // sigue abierto (la vista por defecto) y lo hecho. Se vuelve a pedir cada vez
+  // que se recarga la lista, para que la barra y las filas cuenten lo mismo; lo
+  // anterior se queda a la vista mientras tanto, porque no depende del filtro.
+  useEffect(() => {
+    if (!token) return
+
+    let cancelled = false
+
+    Promise.all([api.listTasks(token), api.listTasks(token, 'done')])
+      .then(([open, done]) => {
+        if (cancelled) return
+        setTeamStatuses(
+          new Map([...open, ...done].map((task) => [task.id, task.status])),
+        )
+        setTeamError(false)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setTeamStatuses(null)
+        setTeamError(true)
       })
 
     return () => {
@@ -141,6 +176,9 @@ export function TasksPage() {
       // La API devuelve la lista con las más recientes primero, así que la
       // recién creada entra por arriba. Sin recargar ni volver a pedirla.
       setTasks((current) => [created, ...(current ?? [])])
+      setTeamStatuses((current) =>
+        withStatus(current, created.id, created.status),
+      )
       setTitle('')
 
       // Toda tarea nace pendiente, así que con el filtro puesto en otro estado
@@ -168,6 +206,7 @@ export function TasksPage() {
             item.id === task.id ? { ...item, status } : item,
           ) ?? current,
       )
+      setTeamStatuses((current) => withStatus(current, task.id, status))
       setPendingIds((current) => new Set(current).add(task.id))
       setStatusError(null)
       setNotice(
@@ -185,12 +224,20 @@ export function TasksPage() {
             current?.map((item) => (item.id === updated.id ? updated : item)) ??
             current,
         )
+        // Otra vez, por si la recarga del equipo llegó mientras tanto con la
+        // foto de antes del cambio.
+        setTeamStatuses((current) =>
+          withStatus(current, updated.id, updated.status),
+        )
       } catch (error: unknown) {
         setTasks(
           (current) =>
             current?.map((item) =>
               item.id === task.id ? { ...item, status: previousStatus } : item,
             ) ?? current,
+        )
+        setTeamStatuses((current) =>
+          withStatus(current, task.id, previousStatus),
         )
         setNotice(null)
         setStatusError(
@@ -212,6 +259,20 @@ export function TasksPage() {
   // Lo que se pinta no es lo que trajo la API sino lo que sigue cumpliendo el
   // filtro: de aquí sale que marcar algo como hecho lo saque de la vista.
   const visibleTasks = tasks?.filter((task) => matchesFilter(task.status))
+
+  const teamProgress = teamStatuses && {
+    done: [...teamStatuses.values()].filter((status) => status === 'done')
+      .length,
+    total: teamStatuses.size,
+  }
+
+  // Una vista por defecto vacía puede significar dos cosas muy distintas: que
+  // no hay nada, o que ya está todo hecho. Decir la primera cuando la verdad es
+  // la segunda le cuenta al equipo que no ha hecho nada. Es el mismo recuento
+  // que el de la barra, así que los dos no pueden contar distinto, y está al día
+  // también cuando la vista se vacía porque acabo de cerrar lo último abierto.
+  // Si no se ha podido averiguar, se trata como cero en vez de girar sin fin.
+  const doneCount = teamProgress ? teamProgress.done : teamError ? 0 : null
 
   // El estado pedido, si de verdad es uno de los tres. Se busca en vez de
   // afirmarlo con un `as`: lo que viene de la URL no merece ese voto de
@@ -273,6 +334,12 @@ export function TasksPage() {
           </div>
           <FieldError id="title-error" message={fieldErrors.title} />
         </form>
+
+        {/* Encima del filtro y no debajo: no depende de él, y entre el filtro
+            y las filas que acota no se mete nada. */}
+        <div className="mb-4">
+          <TaskProgress progress={teamProgress} failed={teamError} />
+        </div>
 
         <div className="mb-6">
           <TaskFilter value={statusParam} onChange={handleFilter} />
